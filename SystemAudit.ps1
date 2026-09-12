@@ -116,3 +116,27 @@ function Get-AuditMemoryUsage {
     }
     Write-LogData -Data $MemoryMetrics
 }
+
+## SEC:1- fifth function: RAM Health
+function Get-AuditRamHealth {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "5. RAM HARDWARE & PHYSICAL HEALTH"
+
+    [array]$Props = @(
+        "BankLabel",
+        "DeviceLocator",
+        "Manufacturer",
+        "PartNumber",
+        @{Name = "Capacity_GB"; Expression = {[math]::Round($_.Capacity / 1GB, 2)}},
+        @{Name = "Speed_MHz"; Expression = {$_.Speed}},
+        "ConfiguredClockSpeed",
+        "Status"
+    )
+
+    [array]$PhysicalSticks = Get-CimInstance -ClassName Win32_PhysicalMemory | Select-Object -Property $Props
+
+    Write-LogData -Data $PhysicalSticks
+}
+
