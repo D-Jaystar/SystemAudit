@@ -259,3 +259,150 @@ function Get-AuditBatteryHealth {
         Write-LogData -Data $Fallback
     }
 }
+## SEC:1- NINTH FUNCTION: POWER SUPPLY & ENCLOSURE STATE
+function Get-AuditPowerSupplyState {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "9. POWER SUPPLY, AC ADAPTER & ENCLOSURE SECURITY"
+
+    [PSCustomObject]$PowerMetrics = $null
+
+    try {
+        # Netstroom status (Online = netstroom verbonden, Offline = draait op accu)
+        [array]$LineStatus = Get-CimInstance -Namespace "root/wmi" -ClassName "BatteryStatus" -ErrorAction SilentlyContinue
+        [bool]$IsAcOnline = if ($LineStatus -and $LineStatus.Count -gt 0) { [bool]$LineStatus[0].PowerOnline } else { $true }
+
+        # Behuizingsstatus en manipulatie/openingsdetectie (Chassis Intrusion)
+        [array]$Enclosures = Get-CimInstance -ClassName Win32_SystemEnclosure -ErrorAction Stop
+        [string]$ChassisType = if ($Enclosures.ChassisTypes) { ($Enclosures.ChassisTypes -join ", ") } else { "Onbekend" }
+        [string]$SecurityBreach = switch ($Enclosures.SecurityStatus) {
+            1 { "Other" }
+            2 { "Unknown" }
+            3 { "None (Veilig/Gesloten)" }
+            4 { "Tamper Detected (Waarschuwing)" }
+            5 { "Breach Detected (Kritiek)" }
+            default { "Niet gerapporteerd" }
+        }
+
+        $PowerMetrics = [PSCustomObject]@{
+            AcConnected       = $IsAcOnline
+            ChassisTypes      = $ChassisType
+            ChassisSecurity   = $SecurityBreach
+            LockStatus        = $Enclosures.LockPresentStatus
+            OperationalStatus = "OK"
+        }
+    }
+    catch {
+        $PowerMetrics = [PSCustomObject]@{
+            AcConnected       = "Niet beschikbaar"
+            ChassisTypes      = "Niet beschikbaar"
+            ChassisSecurity   = "Geen sensor-toegang"
+            LockStatus        = "Niet beschikbaar"
+            OperationalStatus = "Fout bij uitlezen WMI"
+        }
+    }
+
+    Write-LogData -Data $PowerMetrics
+}
+
+## SEC:1- TENTH FUNCTION: GRAPHICS CARD & NVIDIA TELEMETRY
+function Get-AuditGpuStatus {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "10. GRAPHICS CARD (GPU) & TELEMETRY"
+
+    [array]$GpuProps = @(
+        "Name",
+        "DriverVersion",
+        "DriverDate",
+        "Status",
+        @{Name = "VRAM_MB"; Expression = {[Math]::Round($_.AdapterRAM / 1MB, 2)}}
+    )
+
+    [array]$GpuList = Get-CimInstance -ClassName Win32_VideoController | Select-Object -Property $GpuProps
+    Write-LogData -Data $GpuList
+
+    # Check op aanwezige NVIDIA SMI tool voor live diepe telemetrie
+    [string]$NvidiaSmiPath = Join-Path -Path $env:ProgramFiles -ChildPath "NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+    if (-not (Test-Path -Path $NvidiaSmiPath)) {
+        $NvidiaSmiPath = "nvidia-smi"
+    }
+
+    $NvidiaSmiCmd = Get-Command -Name $NvidiaSmiPath -ErrorAction SilentlyContinue
+    if ($NvidiaSmiCmd) {
+        try {
+            [string]$SmiQuery = "--query-gpu=name,driver_version,temperature.gpu,utilization.gpu,utilization.memory,memory.total,memory.used --format=csv,noheader,nounits"
+            [string]$RawOutput = & $NvidiaSmiCmd.Source $SmiQuery.Split(" ") 2>$null
+
+            if ($RawOutput) {
+                [array]$Fields = $RawOutput.Trim().Split(",")
+                [PSCustomObject]$NvidiaTelemetry = [PSCustomObject]@{
+                    NvidiaGpuName  = $Fields[0].Trim()
+                    DriverVersion  = $Fields[1].Trim()
+                    GpuTemp_C      = [double]$Fields[2].Trim()
+                    GpuLoad_Pct    = [double]$Fields[3].Trim()
+                    MemLoad_Pct    = [double]$Fields[4].Trim()
+                    TotalVRAM_MB   = [double]$Fields[5].Trim()
+                    UsedVRAM_MB    = [double]$Fields[6].Trim()
+                }
+                Write-LogData -Data $NvidiaTelemetry
+            }
+        }
+        catch {
+            Write-Warning "NVIDIA SMI aanwezig, maar kon telemetrie niet direct ophalen."
+        }
+    }
+}
+
+## SEC:1- ELEVENTH FUNCTION: PERIPHERAL DEVICES & DRIVER ERRORS
+function Get-AuditPeripheralDevices {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "11. PERIPHERAL & USB DEVICE ERROR AUDIT"
+
+    # Filtert apparaten eruit die NIET op 'OK' staan (bijv. Driver Error, Code 10, Code 43, Disabled)
+    [array]$FaultyDevices = Get-CimInstance -ClassName Win32_PnPEntity |
+            Where-Object { $_.Status -ne "OK" -and $_.ConfigManagerErrorCode -ne 0 } |
+            Select-Object Name, DeviceID, Status, ConfigManagerErrorCode,
+            @{Name = "ProblemDescription"; Expression = {
+                switch ($_.ConfigManagerErrorCode) {
+                    1  { "Device not configured" }
+                    10 { "Device cannot start" }
+                    14 { "Reboot required" }
+                    18 { "Reinstall drivers" }
+                    22 { "Device disabled" }
+                    28 { "Drivers not installed" }
+                    43 { "Device stopped (Driver/Hardware problem)" }
+                    default { "Error Code $($_.ConfigManagerErrorCode)" }
+                }
+            }}
+
+    if ($FaultyDevices.Count -gt 0) {
+        Write-Warning "Er zijn aangesloten apparaten met hardware- of driver-fouten gevonden!"
+        Write-LogData -Data $FaultyDevices
+    }
+    else {
+        [PSCustomObject]$CleanStatus = [PSCustomObject]@{
+            PeripheralAudit = "Hardware & USB Bus Scan"
+            ErrorDevices    = 0
+            AuditResult     = "Alle gedetecteerde apparaten functioneren storingsvrij (Status = OK)"
+        }
+        Write-LogData -Data $CleanStatus
+    }
+}
+
+
+## SEC-1 : HARDWARE & PERFORMANCE DIAGNOSTICS COMPLETE
+
+
+
+##=======================================================
+## SEC-2: SECURITY & SYSTEM INTEGRITY                ====
+#=========================================================
+
+
+
+## SEC-2: FIRST FUNCTION: WINDOWS UPDATES:
