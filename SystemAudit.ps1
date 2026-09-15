@@ -401,8 +401,90 @@ function Get-AuditPeripheralDevices {
 
 ##=======================================================
 ## SEC-2: SECURITY & SYSTEM INTEGRITY                ====
-#=========================================================
+#========================================================
 
 
 
 ## SEC-2: FIRST FUNCTION: WINDOWS UPDATES:
+function Get-AuditWindowsUpdates {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "12. WINDOWS UPDATES & PATCH STATUS"
+
+    # 1. Query recent installation history (HotFixes via WMI/CIM)
+    try {
+        [array]$RecentPatches = Get-CimInstance -ClassName Win32_QuickFixEngineering |
+                Sort-Object -Property InstalledOn -Descending |
+                Select-Object -First 5 -Property HotFixID, Description, InstalledBy, InstalledOn
+
+        Write-LogData -Data $RecentPatches
+    }
+    catch {
+        Write-Warning "Failed to query recent hotfixes via Win32_QuickFixEngineering."
+    }
+
+    # 2. Inspect pending updates via COM interface and check for reboot flags
+    try {
+        $UpdateSession = New-Object -ComObject Microsoft.Update.Session
+        $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
+        $SearchResult = $UpdateSearcher.Search("IsInstalled=0 and Type='Software'")
+
+        [PSCustomObject]$PendingReport = [PSCustomObject]@{
+            PendingUpdatesCount = $SearchResult.Updates.Count
+            RebootPending       = (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired")
+            ScanStatus          = "Scan completed successfully"
+        }
+        Write-LogData -Data $PendingReport
+    }
+    catch {
+        Write-Warning "COM Windows Update Session unavailable or requires elevated privileges."
+        [PSCustomObject]$PendingFallback = [PSCustomObject]@{
+            PendingUpdatesCount = "Unavailable (Elevation or Online required)"
+            RebootPending       = (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired")
+            ScanStatus          = "Skipped"
+        }
+        Write-LogData -Data $PendingFallback
+    }
+}
+
+## SEC-2: SECOND FUNCTION: ANTIVIRUS & DEFENDER HEALTH
+function Get-AuditAntivirusStatus {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "13. ANTIVIRUS & DEFENDER ENGINE HEALTH"
+
+    # 1. Algemene Antivirus Productstatus via SecurityCenter2
+    try {
+        [array]$AvProducts = Get-CimInstance -Namespace "root/SecurityCenter2" -ClassName "AntiVirusProduct" -ErrorAction Stop |
+                Select-Object displayName, pathToSignedProductExe, productState
+
+        Write-LogData -Data $AvProducts
+    }
+    catch {
+        Write-Warning "SecurityCenter2 niet bereikbaar (mogelijk Windows Server OS)."
+    }
+
+    # 2. Diepe Microsoft Defender status via MpComputerStatus
+    try {
+        if (Get-Command -Name Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+            $Defender = Get-MpComputerStatus
+
+            [PSCustomObject]$DefenderMetrics = [PSCustomObject]@{
+                DefenderEnabled         = $Defender.AntivirusEnabled
+                RealTimeProtection      = $Defender.RealTimeProtectionEnabled
+                BehaviorMonitor         = $Defender.BehaviorMonitorEnabled
+                IoavProtection          = $Defender.IoavProtectionEnabled
+                AntivirusSignatureAge   = "$($Defender.AntivirusSignatureAge) dagen oud"
+                AntivirusSignatureBuild = $Defender.AntivirusSignatureVersion
+                EngineVersion           = $Defender.AMEngineVersion
+            }
+
+            Write-LogData -Data $DefenderMetrics
+        }
+    }
+    catch {
+        Write-Warning "Kon Get-MpComputerStatus niet direct uitlezen."
+    }
+}
