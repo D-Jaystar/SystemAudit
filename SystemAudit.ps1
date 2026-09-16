@@ -488,3 +488,65 @@ function Get-AuditAntivirusStatus {
         Write-Warning "Kon Get-MpComputerStatus niet direct uitlezen."
     }
 }
+## SEC-2: THIRD FUNCTION: FIREWALL STATUS
+function Get-AuditFirewallStatus {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "14. FIREWALL STATUS & PROFILE POLICIES"
+
+    try {
+        # Query Domain, Private, and Public firewall profile states and default actions
+        [array]$Profiles = Get-NetFirewallProfile -ErrorAction Stop |
+                Select-Object Name, Enabled, DefaultInboundAction, DefaultOutboundAction, AllowInboundRules
+
+        Write-LogData -Data $Profiles
+
+        # Flag any inactive firewall profile as an integrity risk
+        [array]$DisabledProfiles = $Profiles | Where-Object { $_.Enabled -ne $true }
+        if ($DisabledProfiles.Count -gt 0) {
+            Write-Warning "One or more Windows Firewall profiles are disabled!"
+        }
+    }
+    catch {
+        Write-Warning "Failed to query NetFirewallProfile via NetSecurity module."
+        [PSCustomObject]$Fallback = [PSCustomObject]@{
+            FirewallService = (Get-Service -Name "mpssvc" -ErrorAction SilentlyContinue).Status
+            QueryStatus     = "NetFirewallProfile cmdlet unavailable or restricted"
+        }
+        Write-LogData -Data $Fallback
+    }
+}
+
+## SEC-2: FOURTH FUNCTION: NETWORK CONNECTIONS & LISTENING PORTS
+function Get-AuditNetworkConnections {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "15. NETWORK CONNECTIONS & EXPOSED LISTENING PORTS"
+
+    try {
+        # 1. Flag external-facing listening sockets (exclude local loopback: 127.0.0.1 and ::1)
+        [array]$ListeningSockets = Get-NetTCPConnection -State Listen -ErrorAction Stop |
+                Where-Object { $_.LocalAddress -ne "127.0.0.1" -and $_.LocalAddress -ne "::1" } |
+                Select-Object LocalAddress, LocalPort, OwningProcess,
+                @{Name = "ProcessName"; Expression = {(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}}
+
+        Write-LogData -Data $ListeningSockets
+
+        # 2. Audit top 10 active established connections
+        [array]$EstablishedSockets = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue |
+                Select-Object -First 10 -Property LocalAddress, LocalPort, RemoteAddress, RemotePort, OwningProcess,
+                @{Name = "ProcessName"; Expression = {(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}}
+
+        Write-LogData -Data $EstablishedSockets
+    }
+    catch {
+        Write-Warning "Get-NetTCPConnection failed to query network sockets."
+        [PSCustomObject]$NetFallback = [PSCustomObject]@{
+            Status       = "TCP state tables unavailable via CIM/NetTCPIP"
+            ErrorDetails = $_.Exception.Message
+        }
+        Write-LogData -Data $NetFallback
+    }
+}
