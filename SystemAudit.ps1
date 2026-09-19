@@ -550,3 +550,42 @@ function Get-AuditNetworkConnections {
         Write-LogData -Data $NetFallback
     }
 }
+
+## SEC-2: FIFTH FUNCTION: SECURITY EVENT LOG AUDIT
+function Get-AuditSecurityEvents {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "16. SECURITY EVENT LOGS & AUDIT FAILURES"
+
+    try {
+        # Query specific critical Event IDs:
+        # 4625 (Failed Logon), 4720 (Account Created), 4728 (Member Added to Security Group)
+        [array]$EventFilter = @(4625, 4720, 4728)
+
+        [array]$Events = Get-WinEvent -FilterHashtable @{
+            LogName = 'Security'
+            Id      = $EventFilter
+        } -MaxEvents 15 -ErrorAction Stop |
+                Select-Object TimeCreated, Id,
+                @{Name = "EventDescription"; Expression = {
+                    switch ($_.Id) {
+                        4625 { "Failed Logon Attempt" }
+                        4720 { "User Account Created" }
+                        4728 { "User Added to Security Group" }
+                        default { "Security Audit Event" }
+                    }
+                }},
+                @{Name = "Account"; Expression = {$_.Properties[1].Value}}
+
+        Write-LogData -Data $Events
+    }
+    catch {
+        Write-Warning "Security event log unreadable or requires Administrator elevation."
+        [PSCustomObject]$Fallback = [PSCustomObject]@{
+            LogStatus    = "Restricted or Empty"
+            AuditMessage = "Elevation required to query Security Event Log channel"
+        }
+        Write-LogData -Data $Fallback
+    }
+}
