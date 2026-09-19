@@ -589,3 +589,39 @@ function Get-AuditSecurityEvents {
         Write-LogData -Data $Fallback
     }
 }
+
+## SEC-2: SIXTH FUNCTION: LOCAL ACCOUNTS & PRIVILEGED MEMBERSHIP
+function Get-AuditUserPrivileges {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "17. USER ACCOUNTS & PRIVILEGED GROUPS"
+
+    try {
+        # 1. Inspect local user accounts for configuration and flags
+        [array]$LocalUsers = Get-CimInstance -ClassName Win32_UserAccount -Filter "LocalAccount=True" -ErrorAction Stop |
+                Select-Object Name, FullName, Disabled, Lockout, PasswordRequired, PasswordChangeable
+
+        Write-LogData -Data $LocalUsers
+
+        # 2. Enumerate privileged members explicitly assigned to the Administrators group
+        [array]$AdminMembers = Get-CimInstance -ClassName Win32_GroupUser |
+                Where-Object { $_.GroupComponent -like "*Administrators*" } |
+                ForEach-Object {
+                    [PSCustomObject]@{
+                        PrivilegedGroup = "Administrators"
+                        MemberName      = ($_.PartComponent -split "=")[1] -replace '"', ""
+                    }
+                }
+
+        Write-LogData -Data $AdminMembers
+    }
+    catch {
+        Write-Warning "Failed to query local user accounts or Administrators group members."
+        [PSCustomObject]$Fallback = [PSCustomObject]@{
+            QueryStatus  = "Failed"
+            ErrorDetails = $_.Exception.Message
+        }
+        Write-LogData -Data $Fallback
+    }
+}
