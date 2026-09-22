@@ -625,3 +625,56 @@ function Get-AuditUserPrivileges {
         Write-LogData -Data $Fallback
     }
 }
+
+
+## SEC-2: SEVENTH FUNCTION: FILE INTEGRITY MONITORING (FIM)
+function Get-AuditFileIntegrity {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "18. FILE INTEGRITY MONITORING (SHA-256 HASH VERIFICATION)"
+
+    # Array of critical core Windows system binaries to audit
+    [array]$CriticalBinaries = @(
+        "$env:windir\System32\ntoskrnl.exe",
+        "$env:windir\System32\lsass.exe",
+        "$env:windir\System32\user32.dll",
+        "$env:windir\System32\cmd.exe"
+    )
+
+    [array]$IntegrityResults = foreach ($BinaryPath in $CriticalBinaries) {
+        # Guard clause: verify existence before computing hash
+        if (-not (Test-Path -Path $BinaryPath)) {
+            [PSCustomObject]@{
+                FileName       = Split-Path -Path $BinaryPath -Leaf
+                IntegrityState = "Missing"
+                SHA256         = "N/A"
+                Path           = $BinaryPath
+            }
+            continue
+        }
+
+        try {
+            # Compute live SHA-256 hash using the native PowerShell cryptographic utility
+            $HashObj = Get-FileHash -Path $BinaryPath -Algorithm SHA256 -ErrorAction Stop
+
+            [PSCustomObject]@{
+                FileName       = Split-Path -Path $BinaryPath -Leaf
+                IntegrityState = "Calculated"
+                SHA256         = $HashObj.Hash
+                Path           = $BinaryPath
+            }
+        }
+        catch {
+            Write-Warning "Access denied or failed to compute hash for: $BinaryPath"
+            [PSCustomObject]@{
+                FileName       = Split-Path -Path $BinaryPath -Leaf
+                IntegrityState = "Locked / Read Failure"
+                SHA256         = "Unavailable"
+                Path           = $BinaryPath
+            }
+        }
+    }
+
+    Write-LogData -Data $IntegrityResults
+}
