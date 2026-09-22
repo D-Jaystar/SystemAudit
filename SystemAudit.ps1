@@ -678,3 +678,63 @@ function Get-AuditFileIntegrity {
 
     Write-LogData -Data $IntegrityResults
 }
+
+## SEC-2: EIGHTH FUNCTION: SCHEDULED TASKS PERSISTENCE AUDIT
+function Get-AuditScheduledTasks {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "19. SCHEDULED TASKS & THIRD-PARTY PERSISTENCE AUDIT"
+
+    try {
+        # Query active scheduled tasks and filter out native Windows/Microsoft OS paths
+        [array]$Tasks = Get-ScheduledTask -ErrorAction Stop |
+                Where-Object {
+                    $_.TaskPath -notmatch "^\\Microsoft\\Windows\\" -and
+                            $_.State -ne "Disabled"
+                }
+
+        # Guard clause: early return if no third-party active tasks exist
+        if ($Tasks.Count -eq 0) {
+            [PSCustomObject]$CleanReport = [PSCustomObject]@{
+                AuditScope     = "Third-Party Scheduled Tasks"
+                ActiveTasks    = 0
+                AuditResult    = "No non-Microsoft scheduled tasks detected"
+            }
+            Write-LogData -Data $CleanReport
+            return
+        }
+
+        [array]$TaskReport = foreach ($Task in $Tasks) {
+            # Extract executable path and command arguments from the first task action
+            [string]$ExecuteAction = $Task.Actions[0].Execute
+            [string]$ActionArgs    = $Task.Actions[0].Arguments
+
+            # Flag persistence risk vectors: scripts, living-off-the-land binaries, or execution from user-writable directories
+            [bool]$IsSuspicious = (
+            $ExecuteAction -match "(powershell|cmd|wscript|cscript|mshta|rundll32)" -or
+                    $ExecuteAction -match "(AppData|Temp|Users\\Public)" -or
+                    $ActionArgs    -match "(-enc|-encodedcommand|-w hidden|-nop|bypass)"
+            )
+
+            [PSCustomObject]@{
+                TaskName         = $Task.TaskName
+                TaskPath         = $Task.TaskPath
+                State            = $Task.State
+                ExecuteTarget    = $ExecuteAction
+                Arguments        = $ActionArgs
+                SuspiciousVector = $IsSuspicious
+            }
+        }
+
+        Write-LogData -Data $TaskReport
+    }
+    catch {
+        Write-Warning "Failed to query scheduled tasks via ScheduledTasks module."
+        [PSCustomObject]$Fallback = [PSCustomObject]@{
+            Status       = "Access denied or ScheduledTasks module unavailable"
+            ErrorDetails = $_.Exception.Message
+        }
+        Write-LogData -Data $Fallback
+    }
+}
