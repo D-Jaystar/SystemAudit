@@ -738,3 +738,81 @@ function Get-AuditScheduledTasks {
         Write-LogData -Data $Fallback
     }
 }
+## SEC-2: NINTH FUNCTION: DRIVER SIGNATURES
+function Get-AuditDriverSignatures {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "20. KERNEL & DEVICE DRIVER SIGNATURES"
+
+    try {
+        # Fetch active running system drivers and verify cryptographic signatures
+        [array]$Drivers = Get-CimInstance -ClassName Win32_SystemDriver -Filter "State='Running'" -ErrorAction Stop |
+                Where-Object { $_.PathName -and (Test-Path $_.PathName -ErrorAction SilentlyContinue) }
+
+        [array]$Unsigned = foreach ($Drv in $Drivers) {
+            $Sig = Get-AuthenticodeSignature -FilePath $Drv.PathName -ErrorAction SilentlyContinue
+            if ($Sig.Status -ne "Valid") {
+                [PSCustomObject]@{
+                    DriverName = $Drv.Name
+                    Path       = $Drv.PathName
+                    Signature  = $Sig.Status
+                }
+            }
+        }
+
+        if ($Unsigned.Count -gt 0) {
+            Write-Warning "Unsigned running drivers detected! Potential rootkit or legacy driver."
+            Write-LogData -Data $Unsigned
+        } else {
+            [PSCustomObject]$CleanStatus = [PSCustomObject]@{
+                AuditScope  = "Running System Drivers"
+                AuditResult = "All active kernel and device drivers are digitally signed"
+            }
+            Write-LogData -Data $CleanStatus
+        }
+    }
+    catch {
+        Write-Warning "Failed to query Win32_SystemDriver or authenticate signatures."
+    }
+}
+
+## SEC-2: TENTH FUNCTION: SYSTEM RESTORE POINTS
+function Get-AuditSystemRestore {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "21. SYSTEM RESTORE POINTS & PROTECTION"
+
+    try {
+        # Validate that System Protection is enabled and snapshot history exists
+        [array]$RestorePoints = Get-ComputerRestorePoint -ErrorAction SilentlyContinue |
+                Select-Object CreationTime, Description, SequenceNumber, EventType
+
+        if ($RestorePoints.Count -gt 0) {
+            Write-LogData -Data $RestorePoints
+        } else {
+            Write-Warning "No active System Restore points found! System is without recovery guardrails."
+            [PSCustomObject]$NoPoints = [PSCustomObject]@{
+                SystemRestore = "Disabled or Empty"
+                ActionNeeded  = "Enable System Protection and create a restore point"
+            }
+            Write-LogData -Data $NoPoints
+        }
+    }
+    catch {
+        Write-Warning "Failed to query System Restore points. Run as Administrator."
+    }
+}
+
+
+## SEC-2: SECURITY & SYSTEM INTEGRITY COMPLETE
+
+
+
+##=======================================================
+## SEC-3: AUTOMATED SYSTEM MAINTENANCE & CLEANUP     ====
+##=======================================================
+
+
+
