@@ -809,10 +809,202 @@ function Get-AuditSystemRestore {
 ## SEC-2: SECURITY & SYSTEM INTEGRITY COMPLETE
 
 
-
 ##=======================================================
 ## SEC-3: AUTOMATED SYSTEM MAINTENANCE & CLEANUP     ====
 ##=======================================================
+
+## SEC-3: FUNCTION 1: WINDOWS TEMP
+function Invoke-MaintenanceWindowsTemp {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "22. SYSTEM LEVEL TEMP FILES (C:\Windows\Temp)"
+
+    try {
+        Remove-Item -Path "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        [PSCustomObject]@{ Target = "Windows Temp"; Status = "Flushed successfully" } | Write-LogData
+    } catch {
+        [PSCustomObject]@{ Target = "Windows Temp"; Status = "Partial flush (Files in use)" } | Write-LogData
+    }
+}
+
+## SEC-3: FUNCTION 2: USER TEMP & CACHE
+function Invoke-MaintenanceUserTemp {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "23. USER LEVEL TEMP & LOCAL CACHES"
+
+    [array]$Targets = @(
+        @{ Name="User Temp"; Path="$env:TEMP\*" },
+        @{ Name="User App Cache"; Path="$env:USERPROFILE\.cache\*" }
+    )
+
+    foreach ($Target in$Targets) {
+        try {
+            Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
+        } catch {
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Partial flush (Files in use)" } | Write-LogData
+        }
+    }
+}
+
+## SEC-3: FUNCTION 3: RECYCLE BIN
+function Invoke-MaintenanceRecycleBin {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "24. EMPTY RECYCLE BIN"
+
+    try {
+        Clear-RecycleBin -Force -Confirm:$false -ErrorAction Stop
+        [PSCustomObject]@{ Target = "Recycle Bin (`$Recycle.Bin)"; Status = "Emptied successfully" } | Write-LogData
+    } catch {
+        [PSCustomObject]@{ Target = "Recycle Bin (`$Recycle.Bin)"; Status = "Empty or access denied" } | Write-LogData
+    }
+}
+
+## SEC-3: FUNCTION 4: COMPONENT STORE CLEANUP
+function Invoke-MaintenanceComponentStore {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "25. DISM COMPONENT STORE CLEANUP (WinSxS)"
+
+    try {
+        Write-Warning "Executing DISM /ResetBase. This will permanently purge superseded Windows Update backups."
+        $DismTask = Start-Process -FilePath "Dism.exe" -ArgumentList "/Online /Cleanup-Image /StartComponentCleanup /ResetBase" -Wait -PassThru -WindowStyle Hidden
+
+        [PSCustomObject]@{
+            Engine   = "DISM Component Cleanup"
+            ExitCode = $DismTask.ExitCode
+            Status   = if ($DismTask.ExitCode -eq 0) { "Component Store Optimized" } else { "Completed with warnings" }
+        } | Write-LogData
+    }
+    catch {
+        Write-Warning "Failed to execute DISM maintenance task."
+    }
+}
+
+## SEC-3: FUNCTION 5: CRASH DUMPS & WER
+function Invoke-MaintenanceCrashDumps {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "26. CRASH DUMPS & WINDOWS ERROR REPORTING"
+
+    [array]$Targets = @(
+        @{ Name="Minidump (*.dmp)"; Path="C:\Windows\Minidump\*" },
+        @{ Name="WER Archives"; Path="C:\ProgramData\Microsoft\Windows\WER\ReportArchive\*" }
+    )
+
+    foreach ($Target in$Targets) {
+        try {
+            Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
+        } catch {
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Partial flush" } | Write-LogData
+        }
+    }
+}
+
+## SEC-3: FUNCTION 6: PREFETCH DATA
+function Invoke-MaintenancePrefetch {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "27. STALE PREFETCH RECORDS"
+
+    try {
+        Remove-Item -Path "C:\Windows\Prefetch\*" -Recurse -Force -ErrorAction SilentlyContinue
+        [PSCustomObject]@{ Target = "Windows Prefetch"; Status = "Records purged successfully" } | Write-LogData
+    } catch {
+        [PSCustomObject]@{ Target = "Windows Prefetch"; Status = "Partial flush" } | Write-LogData
+    }
+}
+
+## SEC-3: FUNCTION 7: DELIVERY OPTIMIZATION
+function Invoke-MaintenanceDeliveryOptimization {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "28. DELIVERY OPTIMIZATION & WU CACHE"
+
+    try {
+        Remove-Item -Path "C:\Windows\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue
+        [PSCustomObject]@{ Target = "Delivery Optimization"; Status = "Update cache cleared successfully" } | Write-LogData
+    } catch {
+        [PSCustomObject]@{ Target = "Delivery Optimization"; Status = "Partial flush" } | Write-LogData
+    }
+}
+
+## SEC-3: FUNCTION 8: WEB & BROWSER CACHES
+function Invoke-MaintenanceBrowserCaches {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "29. WEB & BROWSER CACHES"
+
+    [array]$Targets = @(
+        @{ Name="Edge Cache"; Path="$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache\Cache_Data\*" },
+        @{ Name="Opera GX Cache"; Path="$env:APPDATA\Opera Software\Opera GX Stable\Cache\Cache_Data\*" }
+    )
+
+    foreach ($Target in$Targets) {
+        try {
+            Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
+        } catch {
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Partial flush" } | Write-LogData
+        }
+    }
+}
+
+## SEC-3: FUNCTION 9: BUILD & PACKAGE CACHES
+function Invoke-MaintenanceBuildCaches {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "30. BUILD ARTIFACTS & DEVELOPMENT CACHES"
+
+    [array]$Targets = @(
+        @{ Name="Gradle Caches"; Path="$env:USERPROFILE\.gradle\caches\*" },
+        @{ Name="Modrinth Caches"; Path="$env:LOCALAPPDATA\ModrinthApp\Temp\*" },
+        @{ Name="Python PIP Cache"; Path="$env:LOCALAPPDATA\pip\Cache\*" }
+    )
+
+    foreach ($Target in$Targets) {
+        try {
+            Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
+        } catch {
+            [PSCustomObject]@{ Target = $Target.Name; Status = "Partial flush" } | Write-LogData
+        }
+    }
+}
+
+## SEC-3: FUNCTION 10: STORAGE OPTIMIZATION (TRIM)
+function Invoke-MaintenanceStorageTrim {
+    [CmdletBinding()]
+    param ()
+
+    Write-LogHeader -Title "31. SSD TRIM & STORAGE OPTIMIZATION"
+
+    try {
+        $TrimTask = Start-Process -FilePath "defrag.exe" -ArgumentList "C: /L /V" -Wait -PassThru -WindowStyle Hidden
+
+        [PSCustomObject]@{
+            TargetDrive = "C:\"
+            Engine      = "Defrag /L /V (TRIM)"
+            ExitCode    = $TrimTask.ExitCode
+            Status      = if ($TrimTask.ExitCode -eq 0) { "TRIM Command Issued Successfully" } else { "Optimization skipped/failed" }
+        } | Write-LogData
+    }
+    catch {
+        Write-Warning "Failed to trigger storage optimization."
+    }
+}
 
 
 
