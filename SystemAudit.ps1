@@ -1,3 +1,12 @@
+# ====================================
+# Auto-Elevation to Administrator
+# ====================================
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Warning "Restarting script with Administrator privileges..."
+    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    Exit
+}
 # 1. Configuration and logging setup
 # ====================================
 
@@ -45,7 +54,7 @@ function Write-LogData {
 }
 ## SEC:1- FIRST FUNCTION: DISK SPACE
 function Get-AuditDiskSpace {
-    [CmdletBindingAttribute()]
+    [CmdletBinding()]
     param ()
 
     Write-LogHeader -title "1. DISK SPACE (BESCHIKBARE OPSLAG)"
@@ -67,7 +76,7 @@ function Get-AuditDiskHealth {
         Select-Object DeviceId, FriendlyName, MediaType, OperationalStatus, HealthStatus
     Write-LogData -Data $PhysicalDisks
 
-    [Array]$Reliability = Get-StorageReliabilityCounter -PhysicalDisk (Get-PhysicalDisk) -ErrorAction SilentlyContinue |
+    [Array]$Reliability = Get-PhysicalDisk | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue |
         Select-Object DeviceId, ReadErrorsTotal, WriteErrorsTotal, Temperature, Wear
 
     if ($Reliability) {
@@ -840,7 +849,7 @@ function Invoke-MaintenanceUserTemp {
         @{ Name="User App Cache"; Path="$env:USERPROFILE\.cache\*" }
     )
 
-    foreach ($Target in$Targets) {
+    foreach ($Target in $Targets) {
         try {
             Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
             [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
@@ -899,7 +908,7 @@ function Invoke-MaintenanceCrashDumps {
         @{ Name="WER Archives"; Path="C:\ProgramData\Microsoft\Windows\WER\ReportArchive\*" }
     )
 
-    foreach ($Target in$Targets) {
+    foreach ($Target in $Targets) {
         try {
             Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
             [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
@@ -951,7 +960,7 @@ function Invoke-MaintenanceBrowserCaches {
         @{ Name="Opera GX Cache"; Path="$env:APPDATA\Opera Software\Opera GX Stable\Cache\Cache_Data\*" }
     )
 
-    foreach ($Target in$Targets) {
+    foreach ($Target in $Targets) {
         try {
             Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
             [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
@@ -974,7 +983,7 @@ function Invoke-MaintenanceBuildCaches {
         @{ Name="Python PIP Cache"; Path="$env:LOCALAPPDATA\pip\Cache\*" }
     )
 
-    foreach ($Target in$Targets) {
+    foreach ($Target in $Targets) {
         try {
             Remove-Item -Path $Target.Path -Recurse -Force -ErrorAction SilentlyContinue
             [PSCustomObject]@{ Target = $Target.Name; Status = "Flushed successfully" } | Write-LogData
@@ -1007,4 +1016,43 @@ function Invoke-MaintenanceStorageTrim {
 }
 
 
+
+
+# =======================================================
+# MAIN EXECUTION BLOCK
+# =======================================================
+try { Get-AuditDiskSpace } catch { Write-Warning "$_" }
+try { Get-AuditDiskHealth } catch { Write-Warning "$_" }
+try { Get-AuditCpuUsage } catch { Write-Warning "$_" }
+try { Get-AuditMemoryUsage } catch { Write-Warning "$_" }
+try { Get-AuditThermalStatus } catch { Write-Warning "$_" }
+try { Get-AuditFanStatus } catch { Write-Warning "$_" }
+try { Get-AuditBatteryHealth } catch { Write-Warning "$_" }
+try { Get-AuditPowerSupplyState } catch { Write-Warning "$_" }
+try { Get-AuditGpuStatus } catch { Write-Warning "$_" }
+try { Get-AuditPeripheralDevices } catch { Write-Warning "$_" }
+
+try { Get-AuditWindowsUpdates } catch { Write-Warning "$_" }
+try { Get-AuditAntivirusStatus } catch { Write-Warning "$_" }
+try { Get-AuditFirewallStatus } catch { Write-Warning "$_" }
+try { Get-AuditNetworkConnections } catch { Write-Warning "$_" }
+try { Get-AuditSecurityEvents } catch { Write-Warning "$_" }
+try { Get-AuditUserPrivileges } catch { Write-Warning "$_" }
+try { Get-AuditFileIntegrity } catch { Write-Warning "$_" }
+try { Get-AuditScheduledTasks } catch { Write-Warning "$_" }
+try { Get-AuditDriverSignatures } catch { Write-Warning "$_" }
+try { Get-AuditSystemRestore } catch { Write-Warning "$_" }
+
+try { Invoke-MaintenanceWindowsTemp } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceUserTemp } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceRecycleBin } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceComponentStore } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceCrashDumps } catch { Write-Warning "$_" }
+try { Invoke-MaintenancePrefetch } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceDeliveryOptimization } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceBrowserCaches } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceBuildCaches } catch { Write-Warning "$_" }
+try { Invoke-MaintenanceStorageTrim } catch { Write-Warning "$_" }
+
+Write-LogHeader -title "AUDIT AND MAINTENANCE COMPLETE"
 
